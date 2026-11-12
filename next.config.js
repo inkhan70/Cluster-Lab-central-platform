@@ -1,1 +1,6 @@
-module.exports = { reactStrictMode: true };
+module.exports = {
+  reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_FIREBASE_API_KEY: process.env.apiKey,
+  },
+};
