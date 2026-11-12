@@ -11,7 +11,29 @@ export default function Dashboard() {
   const [apps, setApps] = useState<AppRow[] | null>(null);
   const [logs, setLogs] = useState<Log[]>([]);
   const [err, setErr] = useState("");
-  useEffect(() => onAuthStateChanged(auth(), setUser), []);
+  const [signingIn, setSigningIn] = useState(false);
+  useEffect(() => onAuthStateChanged(auth(), setUser, (error) => setErr(error.message)), []);
+
+  const signIn = async () => {
+    setErr("");
+    setSigningIn(true);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    try {
+      await signInWithPopup(auth(), provider);
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      const messages: Record<string, string> = {
+        "auth/unauthorized-domain": "This app domain is not authorized in Firebase Authentication. Add the current preview or deployment hostname under Authentication → Settings → Authorized domains.",
+        "auth/operation-not-allowed": "Google sign-in is not enabled for this Firebase project. Enable Google under Authentication → Sign-in method.",
+        "auth/popup-blocked": "The browser blocked the Google sign-in popup. Allow pop-ups for this site or open the app in a new tab and try again.",
+        "auth/popup-closed-by-user": "The Google sign-in window was closed before authentication finished.",
+      };
+      setErr(messages[code ?? ""] ?? `Google sign-in failed${code ? ` (${code})` : ". Check the Firebase Authentication settings and try again."}`);
+    } finally {
+      setSigningIn(false);
+    }
+  };
 
   const call = useCallback(async (path: string, init: RequestInit = {}) => {
     const t = await auth().currentUser?.getIdToken();
@@ -31,7 +53,9 @@ export default function Dashboard() {
     catch (e) { setErr(String(e)); }
   };
   if (!user) return <main><h1>Cluster Lab Central</h1>
-    <button onClick={() => signInWithPopup(auth(), new GoogleAuthProvider())}>Sign in with Google</button></main>;
+    <button onClick={signIn} disabled={signingIn}>{signingIn ? "Opening Google sign-in…" : "Sign in with Google"}</button>
+    {err && <p role="alert">{err}</p>}
+  </main>;
   return <main>
     <header style={{ display: "flex", justifyContent: "space-between" }}>
       <h1>Cluster Lab Central</h1><button onClick={() => signOut(auth())}>Sign out</button></header>
