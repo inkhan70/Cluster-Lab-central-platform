@@ -1,0 +1,8 @@
+node_modules
+.next
+.env
+.env.local
+*.json.key
+serviceAccount*.json
+next-env.d.ts
+tsconfig.tsbuildinfo
