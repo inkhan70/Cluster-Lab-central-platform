@@ -4,22 +4,59 @@ import { getFirestore } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
 import { can, Role } from "./schemas";
 
-const requiredAdminEnv = ["FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY"] as const;
+const FIREBASE_PROJECT_ID = "cluster-lab-central-flatform";
+
+type ServiceAccountJson = {
+  project_id?: string;
+  client_email?: string;
+  private_key?: string;
+};
 
 function missingAdminEnv() {
-  return requiredAdminEnv.filter((name) => !process.env[name]);
+  const credential = process.env.FIREBASE_PRIVATE_KEY?.trim();
+  if (!credential) return ["FIREBASE_PRIVATE_KEY"];
+  if (credential.startsWith("{")) return [];
+  return process.env.FIREBASE_CLIENT_EMAIL ? [] : ["FIREBASE_CLIENT_EMAIL"];
+}
+
+function adminCredential() {
+  const credential = process.env.FIREBASE_PRIVATE_KEY?.trim();
+  if (!credential) throw new Error("Firebase Admin: FIREBASE_PRIVATE_KEY is missing.");
+
+  if (credential.startsWith("{")) {
+    let serviceAccount: ServiceAccountJson;
+    try {
+      serviceAccount = JSON.parse(credential) as ServiceAccountJson;
+    } catch {
+      throw new Error("Firebase Admin: FIREBASE_PRIVATE_KEY must be valid service-account JSON.");
+    }
+    if (serviceAccount.project_id !== FIREBASE_PROJECT_ID) {
+      throw new Error(`Firebase Admin: the service-account JSON must belong to ${FIREBASE_PROJECT_ID}.`);
+    }
+    if (!serviceAccount.client_email || !serviceAccount.private_key) {
+      throw new Error("Firebase Admin: the service-account JSON must include client_email and private_key.");
+    }
+    return cert({
+      projectId: serviceAccount.project_id,
+      clientEmail: serviceAccount.client_email,
+      privateKey: serviceAccount.private_key.replace(/\\n/g, "\n"),
+    });
+  }
+
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  if (!clientEmail) throw new Error("Firebase Admin: FIREBASE_CLIENT_EMAIL is missing for a raw PEM key.");
+  return cert({
+    projectId: FIREBASE_PROJECT_ID,
+    clientEmail,
+    privateKey: credential.replace(/\\n/g, "\n"),
+  });
 }
 
 function app(): App {
   if (getApps().length) return getApps()[0];
   const missing = missingAdminEnv();
   if (missing.length) throw new Error(`Missing Firebase Admin settings: ${missing.join(", ")}`);
-
-  return initializeApp({ credential: cert({
-    projectId: "cluster-lab-central-flatform",
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-  }) });
+  return initializeApp({ credential: adminCredential() });
 }
 export const db = () => getFirestore(app());
 
@@ -36,8 +73,11 @@ export async function requireAdmin(req: Request, perm: string) {
   let firebaseApp: App;
   try {
     firebaseApp = app();
-  } catch {
-    return { error: NextResponse.json({ error: "Firebase Admin credentials could not initialize. Check the service-account values in the project environment." }, { status: 503 }) };
+  } catch (error) {
+    const message = error instanceof Error && error.message.startsWith("Firebase Admin:")
+      ? error.message
+      : "Firebase Admin credentials could not initialize. Check the service-account values in the project environment.";
+    return { error: NextResponse.json({ error: message }, { status: 503 }) };
   }
 
   let decoded;
