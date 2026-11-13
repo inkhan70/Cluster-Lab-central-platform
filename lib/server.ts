@@ -92,8 +92,16 @@ export async function requireAdmin(req: Request, perm: string) {
     const role = snap.data()?.role as Role | undefined;
     if (!can(role, perm)) return { error: NextResponse.json({ error: "Your account does not have permission for this action." }, { status: 403 }) };
     return { uid: decoded.uid, email: decoded.email ?? null, role };
-  } catch {
-    return { error: NextResponse.json({ error: "Firebase Admin could not read Firestore roles. Check that the service account has Firestore access." }, { status: 503 }) };
+  } catch (error) {
+    // Full detail goes to server logs only (Vercel > Logs); the client gets a generic hint.
+    const code = (error as { code?: number | string })?.code;
+    console.error("Firestore role read failed", { code, message: (error as Error)?.message });
+    const hint =
+      code === 5 || code === "5" ? "Firestore database (default) was not found. Create it in the Firebase console."
+      : code === 7 || code === "7" ? "The service account lacks Firestore permission (needs Cloud Datastore User)."
+      : code === 16 || code === "16" ? "The service-account key was rejected. Generate a new key and update the Vercel variable."
+      : "Check the Vercel function logs for the exact Firestore error.";
+    return { error: NextResponse.json({ error: `Firebase Admin could not read Firestore roles. ${hint}` }, { status: 503 }) };
   }
 }
 export const audit = (actor: string, action: string, appId: string | null, detail: object = {}) =>
