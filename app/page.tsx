@@ -2,8 +2,9 @@
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut, User } from "firebase/auth";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { auth } from "@/lib/client";
+import { LEGAL_LABEL, LEGAL_TYPES, LegalState, STATE_TEXT } from "@/lib/legal";
 
-type AppRow = { id: string; name: string; platform: string; packageId: string | null; enabled: boolean };
+type AppRow = { id: string; name: string; platform: string; packageId: string | null; enabled: boolean; legal?: Partial<Record<"privacy" | "terms", LegalState>> };
 type Log = { id: string; actor: string; action: string; appId: string | null; at: string };
 type AppsResponse = { apps: AppRow[]; canWrite: boolean };
 
@@ -157,6 +158,8 @@ export default function Dashboard() {
         <div className="grid">{apps?.map((a) => <article className="card app-card" key={a.id}>
           <div className="app-card-top"><div><p className="eyebrow">{a.platform}</p><h3>{a.name}</h3></div><span className={`status-badge ${a.enabled ? "is-enabled" : "is-disabled"}`}>{a.enabled ? "Enabled" : "Review required"}</span></div>
           <p className="app-meta"><code>{a.id}</code><span>{a.packageId ?? "No package ID"}</span></p>
+          <p className="legal-row">{LEGAL_TYPES.map((t) => <span key={t} className={`status-badge legal-${a.legal?.[t] ?? "missing"}`}>{LEGAL_LABEL[t]}: {STATE_TEXT[a.legal?.[t] ?? "missing"]}</span>)}</p>
+          <a className="button-link" href={`/apps/${a.id}/legal`}>Privacy &amp; terms</a>
           {canWrite && <button className={a.enabled ? "button-secondary" : ""} onClick={() => toggle(a)}>{a.enabled ? "Disable app" : "Enable app"}</button>}
         </article>)}</div>}
     </section>

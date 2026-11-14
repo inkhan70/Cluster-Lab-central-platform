@@ -25,3 +25,13 @@ POST `/api/apps` with `{appId, name, platform, packageId|null}`. New apps start 
 
 ## Security and backup
 Never commit `.env*` or service-account files. Rotate keys if leaked. Enable Firestore scheduled backups/PITR in Google Cloud.
+
+## Privacy policy and terms of use pages
+Each app has an editable privacy policy and terms of use (dashboard → app card → **Privacy & terms**).
+- **Workflow:** fill in details, tick what the app really does, *Generate from template*, edit, *Save draft*, then *Save and publish*. Drafts never change the public page. Each publish creates a numbered version in `apps/{appId}/legalDocs/{type}/history`.
+- **Public URLs (no sign-in):** `/legal/{appId}/privacy` and `/legal/{appId}/terms`. Use the privacy URL in Google Play Console → App content → Privacy policy. Only published text is served.
+- **Publish guard:** templates include `[REVIEW: …]` notes where only you know the facts (retention period, SDK list, child-directed apps). Publishing is blocked until they are resolved.
+- **Play checklist:** the privacy tab lists published state, contact email, account-deletion URL for apps with accounts, and a manual reminder to match your Data safety form.
+- **Not legal advice.** Templates are generic starting points. Have apps that handle children's data, payments, or sensitive data reviewed by a qualified professional.
+- Optional env var `NEXT_PUBLIC_SITE_URL` sets the base URL stored as the app's `privacyPolicyUrl`.
+- No Firestore rule changes are needed: documents are read and written only by server routes.
