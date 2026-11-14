@@ -2,7 +2,7 @@ import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { NextResponse } from "next/server";
-import { can, Role } from "./schemas";
+import { can, normalizeRole } from "./schemas";
 
 const FIREBASE_PROJECT_ID = "cluster-lab-central-flatform";
 
@@ -88,9 +88,22 @@ export async function requireAdmin(req: Request, perm: string) {
   }
 
   try {
-    const snap = await db().doc(`admins/${decoded.uid}`).get();
-    const role = snap.data()?.role as Role | undefined;
-    if (!can(role, perm)) return { error: NextResponse.json({ error: "Your account does not have permission for this action." }, { status: 403 }) };
+    const ref = db().doc(`admins/${decoded.uid}`);
+    let snap = await ref.get();
+    // First-owner bootstrap: only the UID in the server-only env var can self-create the owner record.
+    const bootstrap = process.env.BOOTSTRAP_OWNER_UID?.trim();
+    if (!snap.exists && bootstrap && bootstrap === decoded.uid) {
+      await ref.create({ role: "owner", email: decoded.email ?? null, bootstrapped: true, createdAt: new Date().toISOString() });
+      await audit(decoded.uid, "admin.bootstrap_owner", null, {});
+      snap = await ref.get();
+    }
+    const role = normalizeRole(snap.data()?.role);
+    if (!snap.exists || !role) {
+      // The UID is the caller's own, so showing it helps them create the right document.
+      const why = !snap.exists ? `no document at admins/${decoded.uid}` : `document admins/${decoded.uid} has no valid "role" (owner, admin or viewer)`;
+      return { error: NextResponse.json({ error: `Signed in, but ${why}.` }, { status: 403 }) };
+    }
+    if (!can(role, perm)) return { error: NextResponse.json({ error: `Your role (${role}) does not have permission for this action.` }, { status: 403 }) };
     return { uid: decoded.uid, email: decoded.email ?? null, role };
   } catch (error) {
     // Full detail goes to server logs only (Vercel > Logs); the client gets a generic hint.

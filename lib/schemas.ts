@@ -19,3 +19,9 @@ export const appPatch = z.object({
   privacyPolicyUrl: z.string().url().nullable().optional(),
   supportEnabled: z.boolean().optional(),
 }).strict();
+
+/** Tolerates "Owner", " owner " etc.; returns undefined for anything that is not a known role. */
+export const normalizeRole = (v: unknown): Role | undefined => {
+  const r = typeof v === "string" ? v.trim().toLowerCase() : "";
+  return (ROLES as readonly string[]).includes(r) ? (r as Role) : undefined;
+};
