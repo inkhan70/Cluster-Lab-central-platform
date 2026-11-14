@@ -6,7 +6,10 @@ export async function GET(req: Request) {
   const a = await requireAdmin(req, "apps:read");
   if (a.error) return a.error;
   const snap = await db().collection("apps").orderBy("name").get();
-  return NextResponse.json({ apps: snap.docs.map((d) => ({ id: d.id, ...d.data() })) });
+  return NextResponse.json({
+    apps: snap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    canWrite: a.role === "owner" || a.role === "admin",
+  });
 }
 export async function POST(req: Request) {
   const a = await requireAdmin(req, "apps:write");
