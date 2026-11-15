@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { appCreate } from "@/lib/schemas";
+import { SEED_APPS } from "@/lib/seed";
 import { audit, db, requireAdmin } from "@/lib/server";
 
 export async function GET(req: Request) {
@@ -14,7 +15,31 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const a = await requireAdmin(req, "apps:write");
   if (a.error) return a.error;
-  const p = appCreate.safeParse(await req.json().catch(() => null));
+  const payload = await req.json().catch(() => null);
+  if (payload && typeof payload === "object" && "action" in payload && payload.action === "seed-defaults") {
+    let created = 0;
+    const timestamp = new Date().toISOString();
+    for (const app of SEED_APPS) {
+      const ref = db().doc(`apps/${app.appId}`);
+      const wasCreated = await db().runTransaction(async (transaction) => {
+        const existing = await transaction.get(ref);
+        if (existing.exists) return false;
+        transaction.create(ref, {
+          ...app,
+          enabled: false,
+          supportEnabled: false,
+          privacyPolicyUrl: null,
+          createdAt: timestamp,
+        });
+        return true;
+      });
+      if (wasCreated) created += 1;
+    }
+    const skipped = SEED_APPS.length - created;
+    await audit(a.uid!, "apps.seed", null, { created, skipped });
+    return NextResponse.json({ created, skipped });
+  }
+  const p = appCreate.safeParse(payload);
   if (!p.success) return NextResponse.json({ error: p.error.flatten() }, { status: 400 });
   const ref = db().doc(`apps/${p.data.appId}`);
   if ((await ref.get()).exists) return NextResponse.json({ error: "app exists" }, { status: 409 });
