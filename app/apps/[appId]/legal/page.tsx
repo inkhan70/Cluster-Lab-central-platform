@@ -1,10 +1,10 @@
 "use client";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { apiCall } from "@/lib/api-client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ApiError, apiCall } from "@/lib/api-client";
 import { auth } from "@/lib/client";
-import { generateTemplate, getReviewNotes, LEGAL_LABEL, LEGAL_TYPES, LegalType, LegalVars, legalState, playChecklist, renderMarkdown, STATE_TEXT } from "@/lib/legal";
+import { generateTemplate, getReviewNotes, LEGAL_LABEL, LEGAL_TYPES, LegalType, LegalVars, legalState, playChecklist, renderMarkdown, ReviewNote, STATE_TEXT } from "@/lib/legal";
 
 type Doc = { body: string; vars: LegalVars; publishedBody?: string | null; version?: number; publishedAt?: string };
 type Loaded = { app: { id: string; name: string }; docs: Record<LegalType, Doc | null>; canWrite: boolean; siteUrl: string };
@@ -26,6 +26,7 @@ export default function LegalEditor() {
   const [vars, setVars] = useState<LegalVars>(blank());
   const [bodies, setBodies] = useState<Record<LegalType, string>>({ privacy: "", terms: "" });
   const [error, setError] = useState(""); const [note, setNote] = useState(""); const [busy, setBusy] = useState(false);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => onAuthStateChanged(auth(), setUser), []);
 
   const load = useCallback(async () => {
@@ -47,19 +48,37 @@ export default function LegalEditor() {
   const checks = useMemo(() => playChecklist({ state, body, vars, publicUrl: url }), [state, body, vars, url]);
   const reviewNotes = useMemo(() => getReviewNotes(body), [body]);
   const setVar = (k: keyof LegalVars, v: string | boolean) => setVars((p) => ({ ...p, [k]: v }));
+  const focusReviewNote = (reviewNote?: ReviewNote) => {
+    if (!reviewNote) return;
+    const start = body.indexOf(reviewNote.text);
+    if (start < 0) return;
+    editorRef.current?.focus();
+    editorRef.current?.setSelectionRange(start, start + reviewNote.text.length);
+  };
 
   const generate = () => {
     if (body.trim() && !confirm("Replace the current text with a fresh template? Unsaved edits will be lost.")) return;
     setBodies((b) => ({ ...b, [tab]: generateTemplate(tab, data!.app.name, vars) })); setNote("");
   };
   const run = async (publish: boolean) => {
-    setBusy(true); setError(""); setNote("");
+    setError(""); setNote("");
+    if (publish && reviewNotes.length > 0) {
+      setError(`Cannot publish yet: resolve ${reviewNotes.length} review note${reviewNotes.length === 1 ? "" : "s"}. The first note is selected in the editor.`);
+      focusReviewNote(reviewNotes[0]);
+      return;
+    }
+    setBusy(true);
     try {
       await apiCall(`/api/apps/${appId}/legal/${tab}`, { method: "PUT", body: JSON.stringify({ vars, body }) });
       if (publish) { const r = await apiCall(`/api/apps/${appId}/legal/${tab}`, { method: "POST" }); setNote(`Published version ${r.version}. Public URL: ${r.url}`); }
       else setNote("Draft saved. The public page is unchanged until you publish.");
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "LEGAL_REVIEW_REQUIRED" && e.reviewNotes?.length) {
+        setError(`The server found ${e.reviewNotes.length} unresolved review note${e.reviewNotes.length === 1 ? "" : "s"}. Review the highlighted text before publishing.`);
+        focusReviewNote(e.reviewNotes[0]);
+      } else setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
   };
 
   if (user === undefined) return <main className="page-shell"><p className="mut" role="status">Loading…</p></main>;
@@ -85,15 +104,16 @@ export default function LegalEditor() {
         <div className="section-heading"><div><h2>{LEGAL_LABEL[tab]}</h2><p className="mut">{dirty ? "Unsaved changes · " : ""}{doc?.version ? `Version ${doc.version} live` : "Not published"}</p></div><span className={`status-badge legal-${state}`}>{STATE_TEXT[state]}</span></div>
         {reviewNotes.length > 0 && <aside className="review-warning" role="alert" aria-labelledby="review-warning-heading">
           <h3 id="review-warning-heading">Resolve review notes before publishing</h3>
-          <p>These template notes need your real details. Replace or remove each note in the text editor; publishing stays disabled until none remain.</p>
+          <p>These template notes need your real details. Replace or remove each note in the text editor; publishing remains blocked until none remain.</p>
           <ol>{reviewNotes.map((note, index) => <li key={`${note.line}-${index}`}><span className="review-line">Line {note.line}</span><code>{note.text}</code></li>)}</ol>
         </aside>}
         <div className="editor-grid">
-          <label className="form-field">Text (Markdown: #, ##, - lists, **bold**, [links](https://…))<textarea value={body} disabled={!w} onChange={(e) => setBodies((b) => ({ ...b, [tab]: e.target.value }))} rows={22} spellCheck /></label>
+          <label className="form-field">Text (Markdown: #, ##, - lists, **bold**, [links](https://…))<textarea ref={editorRef} value={body} disabled={!w} onChange={(e) => setBodies((b) => ({ ...b, [tab]: e.target.value }))} rows={22} spellCheck /></label>
           <div><p className="eyebrow">Preview</p><div className="legal-doc preview" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) || "<p>Nothing to preview yet.</p>" }} /></div>
         </div>
         {w && <div className="form-footer"><button className="button-secondary" onClick={generate} disabled={busy}>Generate from template</button>
-          <span className="button-row"><button className="button-secondary" onClick={() => run(false)} disabled={busy || !body.trim()}>Save draft</button><button onClick={() => run(true)} disabled={busy || !body.trim() || reviewNotes.length > 0}>{busy ? "Working…" : "Save and publish"}</button></span></div>}
+          <span className="button-row"><button className="button-secondary" onClick={() => run(false)} disabled={busy || !body.trim()}>Save draft</button><button onClick={() => run(true)} disabled={busy || !body.trim()} aria-describedby={reviewNotes.length ? "publish-review-hint" : undefined}>{busy ? "Working…" : "Save and publish"}</button></span></div>}
+        {reviewNotes.length > 0 && <p id="publish-review-hint" className="field-hint publish-review-hint" role="status">Publishing is blocked until these notes are resolved. <button type="button" className="review-jump-link" onClick={() => focusReviewNote(reviewNotes[0])}>Jump to first note (line {reviewNotes[0].line})</button></p>}
         <p className="mut">Public URL: <code>{url}</code> <button className="button-secondary" onClick={() => navigator.clipboard?.writeText(url)}>Copy</button></p>
         {tab === "privacy" && <div className="check-list"><p className="eyebrow">Google Play Console checklist</p><ul>{checks.map((c) => <li key={c.id}><span aria-hidden>{c.manual ? "☐" : c.ok ? "✅" : "⚠️"}</span> {c.label}{!c.ok && <span className="field-hint"> — {c.hint}</span>}</li>)}</ul></div>}
       </section></>}
