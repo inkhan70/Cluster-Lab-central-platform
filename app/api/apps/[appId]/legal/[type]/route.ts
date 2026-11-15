@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { appId as appIdSchema } from "@/lib/schemas";
-import { hasReviewMarker, legalSave, legalState, legalType, legalVars, publicPath, siteUrl, zodMessage } from "@/lib/legal";
+import { getReviewNotes, legalSave, legalState, legalType, legalVars, publicPath, siteUrl, zodMessage } from "@/lib/legal";
 import { audit, db, requireAdmin } from "@/lib/server";
 
 type Ctx = { params: { appId: string; type: string } };
-class Blocked extends Error {}
+class Blocked extends Error {
+  constructor(message: string, readonly code: string, readonly details: Record<string, unknown> = {}) {
+    super(message);
+    this.name = "Blocked";
+  }
+}
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 
 async function guard(req: Request, ctx: Ctx) {
@@ -44,9 +49,13 @@ export async function POST(req: Request, ctx: Ctx) {
   try {
     await db().runTransaction(async (tx) => {
       const d = (await tx.get(g.ref)).data();
-      if (!d?.body?.trim()) throw new Blocked("Save a draft before publishing.");
-      if (hasReviewMarker(d.body)) throw new Blocked("Resolve every [REVIEW: …] note before publishing.");
-      if (!legalVars.safeParse(d.vars).success) throw new Blocked("Complete the developer name, contact email, and effective date first.");
+      if (!d?.body?.trim()) throw new Blocked("Save a draft before publishing.", "LEGAL_DRAFT_REQUIRED");
+      const reviewNotes = getReviewNotes(d.body);
+      if (reviewNotes.length) throw new Blocked("Resolve every [REVIEW: …] note before publishing.", "LEGAL_REVIEW_REQUIRED", { reviewNotes });
+      const vars = legalVars.safeParse(d.vars);
+      if (!vars.success) throw new Blocked("Complete the developer name, contact email, and effective date first.", "LEGAL_DETAILS_REQUIRED", {
+        issues: vars.error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
+      });
       version = (d.version ?? 0) + 1;
       tx.set(g.ref, { publishedBody: d.body, publishedVars: d.vars, version, publishedAt: now, publishedBy: g.uid }, { merge: true });
       tx.set(g.ref.collection("history").doc(String(version)), { body: d.body, vars: d.vars, publishedAt: now, publishedBy: g.uid });
@@ -56,7 +65,7 @@ export async function POST(req: Request, ctx: Ctx) {
     await audit(g.uid, "legal.publish", ctx.params.appId, { type: g.type, version });
     return NextResponse.json({ ok: true, version, url });
   } catch (error) {
-    if (error instanceof Blocked) return bad(error.message, 422);
+    if (error instanceof Blocked) return NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: 422 });
     console.error("Legal publish failed", error);
     return bad("Could not publish the document. Check the server logs.", 500);
   }
