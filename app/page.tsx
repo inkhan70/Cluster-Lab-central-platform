@@ -24,6 +24,9 @@ export default function Dashboard() {
   const [packageId, setPackageId] = useState("");
   const [createError, setCreateError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState("");
+  const [seedError, setSeedError] = useState("");
   useEffect(() => onAuthStateChanged(auth(), setUser, (error) => setErr(error.message)), []);
 
   const signIn = async () => {
@@ -109,6 +112,24 @@ export default function Dashboard() {
     }
   };
 
+  const seedApps = async () => {
+    setSeedError("");
+    setSeedResult("");
+    setSeeding(true);
+    try {
+      const result = await call("/api/apps", {
+        method: "POST",
+        body: JSON.stringify({ action: "seed-defaults" }),
+      }) as { created: number; skipped: number };
+      setSeedResult(`Seed complete: ${result.created} added, ${result.skipped} already existed. Existing records were not changed.`);
+      await load();
+    } catch (error) {
+      setSeedError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSeeding(false);
+    }
+  };
+
   const toggle = async (a: AppRow) => {
     try { await call(`/api/apps/${a.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !a.enabled }) }); await load(); }
     catch (e) { setErr(String(e)); }
@@ -149,6 +170,12 @@ export default function Dashboard() {
         {createError && <p className="form-error" role="alert">{createError}</p>}
         <div className="form-footer"><p className="mut">New registrations are created disabled for review.</p><button type="submit" disabled={creating}>{creating ? "Registering…" : "Register app"}</button></div>
       </form>
+      <div className="seed-panel">
+        <div><h3>Seed starter apps</h3><p className="mut">Add the four built-in app records. Existing records are skipped and never overwritten.</p></div>
+        <button className="button-secondary" onClick={seedApps} disabled={seeding}>{seeding ? "Seeding…" : "Seed starter apps"}</button>
+      </div>
+      {seedError && <p className="form-error" role="alert">{seedError}</p>}
+      {seedResult && <p className="success-message" role="status">{seedResult}</p>}
     </section>}
     <section className="dashboard-section" aria-labelledby="apps-heading">
       <div className="section-heading"><div><p className="eyebrow">REGISTRY</p><h2 id="apps-heading">Registered apps</h2></div><button className="button-secondary" onClick={load} disabled={appsLoading}>{appsLoading ? "Refreshing…" : "Refresh"}</button></div>
