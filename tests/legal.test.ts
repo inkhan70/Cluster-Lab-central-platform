@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateTemplate, hasReviewMarker, legalSave, legalState, legalVars, playChecklist, renderMarkdown } from "../lib/legal";
+import { generateTemplate, getReviewNotes, hasReviewMarker, legalSave, legalState, legalVars, playChecklist, renderMarkdown } from "../lib/legal";
 
 const v = legalVars.parse({ developerName: "Acme Labs", contactEmail: "help@example.com", effectiveDate: "2026-11-14" });
 describe("templates", () => {
@@ -12,8 +12,13 @@ describe("templates", () => {
     expect(generateTemplate("terms", "A", v)).not.toContain("Voluntary support");
     expect(generateTemplate("terms", "A", { ...v, acceptsSupport: true })).toContain("does not unlock features");
   });
-  it("blocks publishing while review notes remain", () => {
-    expect(hasReviewMarker(generateTemplate("privacy", "A", { ...v, usesAccounts: true }))).toBe(true);
+  it("blocks publishing while review notes remain and reports their lines", () => {
+    const body = generateTemplate("privacy", "A", { ...v, usesAccounts: true });
+    expect(hasReviewMarker(body)).toBe(true);
+    expect(getReviewNotes(body).length).toBeGreaterThan(0);
+    expect(getReviewNotes("before\n[REVIEW: add the real value.]\nafter")).toEqual([
+      { line: 2, text: "[REVIEW: add the real value.]" },
+    ]);
     expect(hasReviewMarker(generateTemplate("privacy", "A", v))).toBe(false);
     expect(hasReviewMarker(generateTemplate("privacy", "A", { ...v, targetsChildren: true }))).toBe(true);
   });

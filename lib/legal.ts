@@ -27,7 +27,11 @@ export const legalState = (d: { body?: string; publishedBody?: string | null } |
   !d ? "missing" : !d.publishedBody ? "draft" : d.body === d.publishedBody ? "published" : "changed";
 
 /** Placeholders the owner must resolve; publishing is blocked while any remain. */
-export const hasReviewMarker = (body: string) => body.includes("[REVIEW");
+export type ReviewNote = { line: number; text: string };
+export const getReviewNotes = (body: string): ReviewNote[] => body.split(/\r?\n/).flatMap((line, index) =>
+  [...line.matchAll(/\[\s*REVIEW\b[^\]]*(?:\]|$)/g)].map(([text]) => ({ line: index + 1, text: text.trim() })),
+);
+export const hasReviewMarker = (body: string) => getReviewNotes(body).length > 0;
 export const siteUrl = (req: Request) => (process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") || new URL(req.url).origin);
 export const publicPath = (appId: string, type: LegalType) => `/legal/${appId}/${type}`;
 
